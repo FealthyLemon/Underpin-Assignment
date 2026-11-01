@@ -1,4 +1,5 @@
 
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -13,17 +14,20 @@ public class ReelController : MonoBehaviour
     [SerializeField] private bool startOnPlay = false;
 
     private RectTransform reelRect;
-    private readonly List<RectTransform> symbolObjects = new List<RectTransform>();
+    private readonly List<RectTransform> symbolObjects =
+        new List<RectTransform>();
 
     private float reelHeight;
     private float symbolHeight;
+
     private bool isSpinning;
+    private bool isStopping;
 
     private void Start()
     {
         reelRect = GetComponent<RectTransform>();
 
-        if (symbolSprites.Length != 4)
+        if (symbolSprites == null || symbolSprites.Length != 4)
         {
             Debug.LogError("Each reel must have exactly 4 symbols!", this);
             return;
@@ -43,7 +47,8 @@ public class ReelController : MonoBehaviour
         symbolHeight = reelHeight / 3f;
 
         // Create a shuffled copy of the symbol array.
-        List<Sprite> shuffledSprites = new List<Sprite>(symbolSprites);
+        List<Sprite> shuffledSprites =
+            new List<Sprite>(symbolSprites);
 
         for (int i = shuffledSprites.Count - 1; i > 0; i--)
         {
@@ -54,7 +59,7 @@ public class ReelController : MonoBehaviour
             shuffledSprites[randomIndex] = temp;
         }
 
-        // Create four symbol images and arrange them vertically.
+        // Create four symbol images.
         for (int i = 0; i < shuffledSprites.Count; i++)
         {
             GameObject symbolObject = new GameObject(
@@ -66,7 +71,8 @@ public class ReelController : MonoBehaviour
 
             symbolObject.transform.SetParent(transform, false);
 
-            RectTransform symbolRect = symbolObject.GetComponent<RectTransform>();
+            RectTransform symbolRect =
+                symbolObject.GetComponent<RectTransform>();
 
             symbolRect.anchorMin = new Vector2(0.5f, 0.5f);
             symbolRect.anchorMax = new Vector2(0.5f, 0.5f);
@@ -77,14 +83,16 @@ public class ReelController : MonoBehaviour
                 symbolHeight
             );
 
-            // Position symbols from top to bottom.
             float yPosition = reelHeight / 2f
                 - symbolHeight / 2f
                 - (i * symbolHeight);
 
-            symbolRect.anchoredPosition = new Vector2(0, yPosition);
+            symbolRect.anchoredPosition =
+                new Vector2(0, yPosition);
 
-            Image symbolImage = symbolObject.GetComponent<Image>();
+            Image symbolImage =
+                symbolObject.GetComponent<Image>();
+
             symbolImage.sprite = shuffledSprites[i];
             symbolImage.preserveAspect = true;
             symbolImage.raycastTarget = false;
@@ -95,37 +103,148 @@ public class ReelController : MonoBehaviour
 
     private void Update()
     {
-        if (!isSpinning)
+        if (!isSpinning || isStopping)
             return;
 
-        MoveSymbols();
+        MoveSymbolsBy(spinSpeed * Time.deltaTime);
     }
 
-    private void MoveSymbols()
+    // Moves all symbols down and recycles those
+    // that move outside the bottom of the reel.
+    private void MoveSymbolsBy(float distance)
     {
+        float recycleDistance = symbolHeight * 4f;
+
+        float lowerBoundary =
+            -reelHeight / 2f - symbolHeight / 2f;
+
         foreach (RectTransform symbol in symbolObjects)
         {
-            symbol.anchoredPosition += Vector2.down
-                * spinSpeed * Time.deltaTime;
+            Vector2 position = symbol.anchoredPosition;
 
-            // Recycle a symbol after it moves below the reel.
-            if (symbol.anchoredPosition.y <= -reelHeight / 2f - symbolHeight / 2f)
+            position.y -= distance;
+
+            while (position.y <= lowerBoundary)
             {
-                symbol.anchoredPosition += Vector2.up * (symbolHeight * 4f);
+                position.y += recycleDistance;
             }
+
+            symbol.anchoredPosition = position;
         }
     }
 
     public void StartSpinning()
     {
-        if (symbolObjects.Count == 0)
+        if (symbolObjects.Count == 0 || isSpinning || isStopping)
             return;
 
         isSpinning = true;
     }
 
-    public void StopSpinning()
+    // Selects a random symbol and smoothly stops
+    // the reel with that symbol in the middle row.
+    public void StopAtRandomSymbol(float stopDuration)
     {
-        isSpinning = false;
+        if (!isSpinning || isStopping)
+            return;
+
+        StartCoroutine(StopReelRoutine(stopDuration));
     }
+
+    private IEnumerator StopReelRoutine(float stopDuration)
+    {
+        isStopping = true;
+
+        // Randomly select which symbol should appear
+        // in the middle row.
+        int randomIndex = Random.Range(0, symbolObjects.Count);
+
+        RectTransform targetSymbol = symbolObjects[randomIndex];
+
+        float recycleDistance = symbolHeight * 4f;
+
+        // Calculate the distance needed to align
+        // the selected symbol with the middle row.
+        float targetDistance =
+            Mathf.Repeat(targetSymbol.anchoredPosition.y,
+            recycleDistance);
+
+        // Continue spinning for extra cycles before stopping.
+        targetDistance += recycleDistance * 2f;
+
+        float elapsedTime = 0f;
+        float previousDistance = 0f;
+
+        // Smoothly decelerate using an ease-out curve.
+        while (elapsedTime < stopDuration)
+        {
+            elapsedTime += Time.deltaTime;
+
+            float progress = Mathf.Clamp01(
+                elapsedTime / stopDuration
+            );
+
+            float easedProgress =
+                1f - Mathf.Pow(1f - progress, 3f);
+
+            float currentDistance =
+                targetDistance * easedProgress;
+
+            float frameDistance =
+                currentDistance - previousDistance;
+
+            MoveSymbolsBy(frameDistance);
+
+            previousDistance = currentDistance;
+
+            yield return null;
+        }
+
+        // Apply any remaining movement.
+        MoveSymbolsBy(targetDistance - previousDistance);
+
+        // Correct tiny floating-point alignment errors.
+        float correction = targetSymbol.anchoredPosition.y;
+
+        foreach (RectTransform symbol in symbolObjects)
+        {
+            Vector2 position = symbol.anchoredPosition;
+            position.y -= correction;
+            symbol.anchoredPosition = position;
+        }
+
+        isSpinning = false;
+        isStopping = false;
+
+        Debug.Log("Reel stopped. Middle symbol: " +
+            targetSymbol.GetComponent<Image>().sprite.name);
+    }
+
+
+    public Sprite GetMiddleSymbol()
+    {
+        if (symbolObjects.Count == 0)
+            return null;
+
+        RectTransform middleSymbol = null;
+        float closestDistance = float.MaxValue;
+
+        // Find the symbol whose center is closest to Y = 0.
+        foreach (RectTransform symbol in symbolObjects)
+        {
+            float distance = Mathf.Abs(symbol.anchoredPosition.y);
+
+            if (distance < closestDistance)
+            {
+                closestDistance = distance;
+                middleSymbol = symbol;
+            }
+        }
+
+        if (middleSymbol == null)
+            return null;
+
+        return middleSymbol.GetComponent<Image>().sprite;
+    }
+
 }
