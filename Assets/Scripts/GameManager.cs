@@ -18,6 +18,11 @@ public class GameManager : MonoBehaviour
     [SerializeField] private TMP_Text resultPanelText;
     [SerializeField] private float resultDisplayDuration = 2f;
 
+    [Header("Audio Settings")]
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip winSound;
+    [SerializeField] private AudioClip loseSound;
+
     private int currentCoins;
     private bool isResultPanelActive;
 
@@ -81,6 +86,7 @@ public class GameManager : MonoBehaviour
 
             Debug.Log("Player won " + winReward + " coins!");
 
+            audioSource.PlayOneShot(winSound);
             StartCoroutine(ShowResultPanel("YOU WIN!", false));
         }
         else
@@ -90,6 +96,7 @@ public class GameManager : MonoBehaviour
             // Only show the losing panel when the balance reaches zero.
             if (currentCoins <= 0)
             {
+                audioSource.PlayOneShot(loseSound);
                 StartCoroutine(ShowResultPanel("YOU LOSE!", true));
             }
         }
